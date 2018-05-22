@@ -1,4 +1,4 @@
-program os_course_work;
+program OSCurse;
 
 uses
     CRT, DOS;
