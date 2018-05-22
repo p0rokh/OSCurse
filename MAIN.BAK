@@ -10,10 +10,7 @@ const
     FIRST_ITEM = 1;
     BUFFER_SIZE = 78;
     MAX_TIME_SLICE = 2;
-    LOCK_TIME = 50;
-
-procedure CLIENT; forward;
-procedure SERVER; forward;
+    LOCK_TIME = 5000;
 
 const
     running_line_text : String = 'A: Korolev Anton. W: "Operating systems" ';
@@ -40,13 +37,11 @@ type
     end;
 
 type
-	TXTVM = array[1..MAX_HEIGHT, 1..MAX_WIDTH] of Cell; { video video_memory for
-                                                            text modes }
+	TXTVM = array[1..MAX_HEIGHT, 1..MAX_WIDTH] of Cell; { video video_memory for text modes }
 
 	OSAnimatingState = (
 		OSAnimatingStateActive,		{ The animation is executing. }
-		OSAnimatingStateStopped		{ The animation has been stopped and has not
-                                    transitioned to inactive. }
+		OSAnimatingStateStopped		{ The animation has been stopped and has not transitioned to inactive. }
 	);
 
 	OSKeyboardTouch = (
@@ -55,9 +50,9 @@ type
 	);
 
     OSQueueState = (
-        OSRunning,
-        OSSuspended,
-        OSCompleted
+        OSQueueStateRunning,
+        OSQueueStateSuspended,
+        OSQueueStateCompleted
     );
 
     OSOperationState = (
@@ -149,7 +144,7 @@ function BUFFER: String;
     begin
         if _queue.iDx <= 0 then begin
             BUFFER := '- buffer is empty';
-        end else if _queue.iDx >= BUFFER_SIZE then begin
+        end else if _queue.iDx >= BUFFER_SIZE begin
             BUFFER := '- buffer is full';
         end else begin
             BUFFER := ' ';
@@ -399,18 +394,14 @@ procedure QUEUE_DRAW;
         y2 := (MAX_HEIGHT div 2) - y1;
 
         Window(x1, y1, x2, y2);
-        TextBackground(Black);
-        ClrScr;
-
-        write('SERVER: ', _queue.itemIn:3, ' > ');
+        write('SERVER: ', itemIn:3, ' > ');
         textColor(serverArm);
         write(serverInf:7);
-        writeln;
 
-        write('CLIENT: ', _queue.itemOut:3, ' > ');
+        write('SERVER: ', itemOut:3, ' > ');
         textColor(clientArm);
         write(clientInf:7);
-        writeln;
+
         writeln;
 
         if _queue.iDx > 0 then begin
@@ -418,7 +409,7 @@ procedure QUEUE_DRAW;
         end;
 
         for i := 1 to _queue.iDx do begin
-            write(_queue.buffer[i], ' ');
+            write(buffer[i], ' ');
         end;
 
         writeln;
@@ -430,16 +421,16 @@ procedure QUEUE_DRAW;
 
 procedure QUEUE_INIT;
     begin
-        _queue.state            := OSRunning;
-		_queue.server.state     := OSPassive;
-		_queue.client.state     := OSPassive;
+        _queue.state := OSQueueStateRunning;
+		_queue.server := OSPassive;
+		_queue.client := OSPassive;
 
-		_queue.item       := -1;
-		_queue.itemIn     := 0;
-		_queue.itemOut    := 0;
-		_queue.iDx        := 0;
+		_queue.item := -1;
+		_queue.itemIn := 0;
+		_queue.itemOut := 0;
+		_queue.iDx := 0;
 
-		_queue.time       := 0;
+		_queue.time := 0;
     end;
 
 procedure CLIENT;
@@ -461,7 +452,7 @@ procedure CLIENT;
             Delay(LOCK_TIME);
         end;
 
-        _queue.client.state := OSPassive;
+        _queue.client.state := OSOperationStatePassive;
         _queue.excess := 0;
     end;
 
@@ -498,7 +489,7 @@ procedure RUN_LOOP;
     begin
         Randomize;
         while Not _ESC do begin
-            _queue.time := Random(MAX_TIME_SLICE) + 1;
+            _queue.thread_life_time := Random(MAX_TIME_SLICE) + 1;
 
             case Random(MAX_TIME_SLICE) + 1 of
                 1: SERVER;
@@ -535,7 +526,7 @@ procedure KeyboadrHandler; interrupt;
     begin
         case port[$60] of
             1: begin
-                _ESC := True;
+                ESC := True;
             end;
 
             12: begin
@@ -641,7 +632,7 @@ procedure INIT; { Setting the property }
     begin
         TICKER_INIT;
 
-        _ESC := False;
+        ESC := False;
     end;
 
 Procedure SetCursorSize(Const BegLine, EndLine: Byte);
