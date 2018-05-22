@@ -10,6 +10,7 @@ const
     FIRST_ITEM = 1;
     BUFFER_SIZE = 78;
     MAX_TIME_SLICE = 2;
+    LOCK_TIME = 5000;
 
 const
     running_line_text : String = 'A: Korolev Anton. W: "Operating systems" ';
@@ -339,27 +340,20 @@ procedure TIME_TICKER_HANDLER;
 	// pragma mark - Two streams //
 }
 
-procedure THREAD(Operation op);
+function EMPTY: Boolean;
     begin
-        _queue.counter := 0;
-        while _queue.counter < _queue.time + _queue.excess do begin
-            case op.tag of
-                OSOperationTypeServer: SERVER;
-                OSOperationTypeClient: CLIENT;
-            end;
+        EMPTY := _queue.counter >= _queue.time + _queue.excess;
+    end;
 
-            Display;
-            Delay(lockTime);
-        end;
+procedure QUEUE_DRAW;
+    begin
 
-        op.state := OSOperationStatePassive;
-        _queue.excess := 0;
     end;
 
 procedure CLIENT;
     begin
         _queue.counter := 0;
-        while _queue.counter < _queue.time + _queue.excess do begin
+        while not EMPTY do begin
             if _queue.iDx > 0 then begin
                     _queue.client.state := OSOperationStateActive;
                     _queue.itemOut := _queue.buffer[iDx];
@@ -371,8 +365,8 @@ procedure CLIENT;
                     Exit;
             end;
 
-            Display;
-            Delay(lockTime);
+            QUEUE_DRAW;
+            Delay(LOCK_TIME);
         end;
 
         _queue.client.state := OSOperationStatePassive;
@@ -382,51 +376,34 @@ procedure CLIENT;
 procedure SERVER;
     begin
         _queue.counter := 0;
-        while _queue.counter < _queue.time + _queue.excess do begin
-            if iDx >= BUFFER_SIZE then begin
-                    _queue.server.state := OSOperationStateActive;
-                    _queue.excess := _queue.time + _queue.excess - _queue.counter;
-                    ClientThread;
-                    Exit;
+        while not EMPTY do begin
+            if iDx < BUFFER_SIZE then begin
+                serverState := TSActive;
+
+                repeat
+                    inc(item);
+                until Feature(item) = AEven;
+
+                itemIn := item;
+                inc(iDx);
+                buffer[iDx] := item;
             end	else begin
-                    serverState := TSActive;
-
-                    repeat
-                        inc(item);
-                    until Feature(item) = AEven;
-
-                    itemIn := item;
-                    inc(iDx);
-                    buffer[iDx] := item;
+                _queue.server.state := OSOperationStatePassive;
+                _queue.excess := _queue.time + _queue.excess - _queue.counter;
+                CLIENT;
+                Exit;
             end;
 
-            Display;
-            Delay(lockTime);
+            QUEUE_DRAW;
+            Delay(LOCK_TIME);
         end;
 
-        op.state := OSOperationStatePassive;
+        _queue.server.state := OSOperationStatePassive;
         _queue.excess := 0;
     end;
 
-
 procedure RUN_LOOP;
     begin
-        {
-
-		while true do
-			begin
-				case state of
-					LPSuspended: Dealloc;
-				end;
-
-				thread_life_time := Random(MAX_TIME_SLICE) + 1;
-
-				case Random(MAX_TIME_SLICE) + 1 of
-					1: ServerThread;
-					2: ClientThread;
-				end;
-			end;
-        }
         Randomize;
         while Not _ESC do begin
             _queue.thread_life_time := Random(MAX_TIME_SLICE) + 1;
@@ -436,6 +413,15 @@ procedure RUN_LOOP;
                 2: CLIENT;
             end;
         end;
+
+        while statement do
+            ;
+
+    end;
+
+procedure TIME_QUEUE_HANDLER;
+    begin
+        Inc(_queue.counter);
     end;
 
 { 	////////////////////////////////////////////
@@ -446,6 +432,7 @@ procedure RUN_LOOP;
 procedure TimeHandler; interrupt;
 	begin
         TIME_TICKER_HANDLER;
+        TIME_QUEUE_HANDLER;
 
 		inline($09C);
 		Systime;
