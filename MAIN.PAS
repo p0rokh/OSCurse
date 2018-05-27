@@ -66,8 +66,6 @@ type
         OSStop
     );
 
-
-
 type
     Timer = record
         counter         : Integer;  { Количество операций таймера }
@@ -216,13 +214,18 @@ procedure DRAW_CONTROLL;
         { Thread }
         y1 := y1 + 3;
 
-        Window(x1, y1, x2, y1 + 1);
+        Window(x1, y1, x2, y1);
         TextBackground(Brown);
         ClrScr;
 
         TextColor(White);
         GoToXY(((x2 - x1) div 2) - 2, 1);
         Write('THREAD');
+
+        TextColor(Yellow);
+        GoToXY(1, 2);
+        WriteLn('F1 SERVER: ');
+        Write('F2 CLIENT: ');
 
     end;
 
@@ -378,9 +381,14 @@ function FEATURE(x: Integer): Boolean;
 		FEATURE := sqrt(x) = round(sqrt(x));
 	end;
 
+function LVLBUF: Real;
+    begin
+        LVLBUF := _queue.iDx / BUFFER_SIZE;
+    end;
+
 procedure QUEUE_DRAW;
     var
-        i, bufferProcent: Integer;
+        i: Integer;
         x1, y1, x2, y2 : Integer;
         serverInf, clientInf: String;
         serverArm, clientArm: Integer;
@@ -391,15 +399,14 @@ procedure QUEUE_DRAW;
         clientInf   := TXT(_queue.client.state);
         clientArm 	:= ARM(_queue.client.state);
 
-        bufferProcent := 0;
-
         x1 := (MAX_WIDTH div 2 );
         y1 := 2;
         x2 := MAX_WIDTH;
         y2 := (MAX_HEIGHT div 2) - y1;
 
         Window(x1, y1, x2, y2);
-        TextBackground(Black);
+        TextBackground(White);
+        textColor(Black);
         ClrScr;
 
         write('SERVER: ', _queue.itemIn:3, ' > ');
@@ -413,10 +420,6 @@ procedure QUEUE_DRAW;
         writeln;
         writeln;
 
-        if _queue.iDx > 0 then begin
-            bufferProcent := round((_queue.iDx * 100) / BUFFER_SIZE);
-        end;
-
         for i := 1 to _queue.iDx do begin
             write(_queue.buffer[i], ' ');
         end;
@@ -424,7 +427,7 @@ procedure QUEUE_DRAW;
         writeln;
         writeln;
 
-        writeln('BUFFER: ', bufferProcent, ' %', BUFFER);
+        writeln('BUFFER: ', round(LVLBUF * 100), ' %', BUFFER);
         writeln;
     end;
 
@@ -682,6 +685,8 @@ BEGIN
 
     SetCursorSize($06, $07);
     Window(1, 1, MAX_WIDTH, MAX_HEIGHT);
+    TextBackground(Black);
+    TextColor(White);
     GotoXY(1, MAX_HEIGHT);
     ClrScr;
 
