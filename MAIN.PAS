@@ -8,7 +8,8 @@ const
     MAX_WIDTH  = 80;
     MAX_COUNTER = 12;
     FIRST_ITEM = 1;
-    BUFFER_SIZE = 78;
+    BUFFER_DIGIT_SIZE = 78;
+    BUFFER_VERSE_SIZE = 15;
     MAX_TIME_SLICE = 2;
     LOCK_TIME = 50;
 
@@ -37,6 +38,10 @@ type
     Rect = record
         origin  : Point;
         size    : Size;
+    end;
+
+    Frame = record
+        x1, y1, x2, y2 : Integer;
     end;
 
 type
@@ -95,11 +100,19 @@ type
         state           : OSOperationState;
     end;
 
+    DigitBuf = record
+        buffer                      : array[1..BUFFER_SIZE] of Integer;
+        iDx, item, itemIn, itemOut  : Integer;
+    end;
+
+    VerseBuf = record
+        buffer                      : array[1..BUFFER_VERSE_SIZE] of String[34];
+        head, tail                  : Word;
+    end;
+
     Queue = record
         state                       : OSQueueState;
-        buffer                      : array[1..BUFFER_SIZE] of Integer;
         client, server              : Operation;
-        iDx, item, itemIn, itemOut  : Integer;
 
         counter, time               : Byte; {atomic_counter, thread_life_time}
         excess                      : Integer; {thread_interval_time}
@@ -113,6 +126,8 @@ var
     _ticker             : Ticker;
     _queue              : Queue;
 
+    _digit              : DigitBuf;
+    _verse              : VerseBuf;
 
     _file               : Text;
 
@@ -154,79 +169,77 @@ function BUFFER: String;
         end;
     end;
 
-procedure DRAW_CONTROLL;
-    var
-        x1, y1, x2, y2 : Integer;
-        l, s : String;
-
+procedure DRAW_RUNNING_LINE;
     begin
-        { Border }
-        x1 := 2;
-        y1 := 2;
-        x2 := (MAX_WIDTH div 2 ) - x1;
-        y2 := MAX_HEIGHT - y1;
-
-        Window(x1, y1, x2, y2);
-        TextBackground(White);
-        ClrScr;
-
-        TextColor(Black);
-        GotoXY(x1, 1);
-        Write('INDICATORS ');
-
-        { Body }
-        x1 := x1 + 1;
-        y1 := y1 + 1;
-        x2 := (MAX_WIDTH div 2 ) - x1;
-        y2 := MAX_HEIGHT - y1;
-
-        { Running line }
-        Window(x1, y1, x2, y1 + 1);
-        TextBackground(Brown);
-        ClrScr;
-
+        Window(29, 4, 37, 6);
+        TextBackground(Black);
         TextColor(White);
-        GoToXY(((x2 - x1) div 2) - 2, 1);
-        Write('LINE');
-
-        Window(x1, y1 + 1, x2, y2);
-        TextBackground(Blue);
         ClrScr;
+
+        GotoXY(1, 1);
 
         if _ticker.row = 1 then begin
-            l := 'Up';
+            WriteLn('UP');
         end else begin
-            l := 'Down'
+            WriteLn('DOWN');
         end;
 
-        TextColor(Yellow);
-        GotoXY(1, 1);
-        Write('Q - Swap location: ');
-        TextColor(Green);
-        Write(l);
-
-        TextColor(Yellow);
-        GoToXY(1, 2);
-        Write('+/- Change speed: ');
-        TextColor(Green);
         Write(_ticker.timer.framerate);
+    end;
 
-        { Thread }
-        y1 := y1 + 3;
-
-        Window(x1, y1, x2, y1);
-        TextBackground(Brown);
+procedure DRAW_CONTROLL;
+    begin
+        { Border }
+        Window(2, 2, 38, 23);
+        TextBackground(White);
+        TextColor(Black);
         ClrScr;
 
+        GotoXY(10, 1);
+        Write('::: CONTROLS :::'); { 16 pt}
+
+        { Body }
+        { 24 - 10 }
+        Window(3, 3, 37, 22);
+        TextBackground(Black);
         TextColor(White);
-        GoToXY(((x2 - x1) div 2) - 2, 1);
-        Write('THREAD');
+        ClrScr;
 
-        TextColor(Yellow);
-        GoToXY(1, 2);
-        WriteLn('F1 SERVER: ');
-        Write('F2 CLIENT: ');
+        { --- --- --- --- --- --- Running line --- --- --- --- --- --- }
+        Window(3, 3, 37, 4);
+        TextBackground(Brown);
+        TextColor(White);
+        ClrScr;
 
+        GoToXY(11, 1);
+        Write('RUNNING LINE'); { 12 pt }
+
+        Window(3, 4, 37, 6); { FRAME RUNNING LINE }
+        TextBackground(Black);
+        TextColor(White);
+        ClrScr;
+
+        GotoXY(1, 1);
+        WriteLn('Q   Swap location       :');
+        Write('+/- Change speed        :');
+
+        { --- --- --- --- --- --- Thread --- --- --- --- --- --- }
+        Window(3, 6, 37, 7);
+        TextBackground(Brown);
+        TextColor(White);
+        ClrScr;
+
+        GoToXY(10, 1);
+        Write('BUFFER  STREAM'); { 14 pt }
+
+        Window(3, 7, 37, 10); { FRAME RUNNING LINE }
+        TextBackground(Black);
+        TextColor(White);
+        ClrScr;
+
+        GoToXY(1, 1);
+        WriteLn('F1 SERVER               :');
+        Write('F2 CLIENT               :');
     end;
 
 procedure LOGG(s : String);
@@ -234,57 +247,6 @@ procedure LOGG(s : String);
         Append(_file);
     	Writeln(_file, s);
     	Close(_file);
-    end;
-
-function StringFromRect(r : Rect): String;
-    var
-        s, tmp : String;
-
-    begin
-        s := 'Rect(x = ';
-        Str(r.origin.x, tmp);
-        s := s + tmp;
-        s := s + ', y = ';
-        Str(r.origin.y, tmp);
-        s := s + tmp;
-        s := s + ', width = ';
-        Str(r.size.width, tmp);
-        s := s + tmp;
-        s := s + ', height = ';
-        Str(r.size.height, tmp);
-        s := s + tmp;
-        s := s + ')';
-
-        StringFromRect := s;
-
-        { StringFromRect := 'Rect(x = ',r.origin.x, ', y = ', r.origin.y, +
-        +', width = ', r.size.width, ', height = ', r.size.height, ')'; }
-    end;
-
-procedure DrawInRect(r :Rect);
-    var
-        x1, y1, x2, y2 : Integer;
-
-    begin
-        x1 := r.origin.x;
-        y1 := r.origin.y;
-        x2 := x1 + r.size.width;
-        y2 := x2 + r.size.height;
-
-        Window(x1, y1, x2, y2);
-    end;
-
-procedure WindowInRect(x, y, width, height : Integer);
-    var
-        r : Rect;
-
-    begin
-        r.origin.x    := x;
-        r.origin.y    := y;
-        r.size.width  := width;
-        r.size.height := height;
-
-        DrawInRect(r);
     end;
 
 { 	////////////////////////////////////////////
@@ -371,9 +333,64 @@ procedure TIME_TICKER_HANDLER;
 	// pragma mark - Two streams //
 }
 
+{ Проверка очереди на заполненноoтo }
+function FULL: Boolean;
+    begin
+        if _verse.tail < _verse.head then begin
+            FULL := _verse.tail + 1 = _verse.head;
+        end;
+
+        FULL := (_verse.head = 1) and (_verse.tail = BUFFER_VERSE_SIZE);
+    end;
+
+    { Добавление элемента в очередь }
+procedure ENQUEUE(Const X: String);
+    begin
+        _verse.buffer[_verse.tail] := X;
+
+        if _verse.tail < BUFFER_VERSE_SIZE then begin
+            Inc(_verse.tail);
+        end else begin
+            _verse.tail := 1;
+        end;
+    end;
+
+    { Извлечение oлемента из очереди }
+function DEQUEUE: String;
+    var
+        head : Word;
+    begin
+        head := _verse.head;
+        if _verse.head < BUFFER_VERSE_SIZE then begin
+            Inc(_verse.head);
+        end else begin
+            _verse.head := 1
+        end;
+
+        DEQUEUE := _verse.buffer[_verse.head];
+    end;
+
+    { Проверка очереди на пуoтоту }
 function EMPTY: Boolean;
     begin
-        EMPTY := _queue.counter >= _queue.time + _queue.excess;
+        EMPTY := _verse.head = _verse.tail;
+    end;
+
+    { Возвращает чиoло oлементов очереди }
+function COUNT: Word;
+    begin
+        if _verse.tail < _verse.head then begin
+            COUNT := BUFFER_VERSE_SIZE - _verse.head + _verse.tail;
+        end else begin
+            COUNT := _verse.tail - _verse.head;
+        end;
+    end;
+
+{ /////////////////////// }
+
+function CAN_PERFORM: Boolean;
+    begin
+        CAN_PERFORM := _queue.counter < _queue.time + _queue.excess;
     end;
 
 function FEATURE(x: Integer): Boolean;
@@ -437,27 +454,42 @@ procedure QUEUE_INIT;
 		_queue.server.state     := OSPassive;
 		_queue.client.state     := OSPassive;
 
-		_queue.item       := -1;
-		_queue.itemIn     := 0;
-		_queue.itemOut    := 0;
-		_queue.iDx        := 0;
+		_digit.item       := -1;
+		_digit.itemIn     := 0;
+		_digit.itemOut    := 0;
+		_digit.iDx        := 0;
 
 		_queue.time       := 0;
     end;
 
 procedure CLIENT;
+    var
+        i, j: Integer;
+        s: String[8];
+        story: String[34];
+
     begin
         _queue.counter := 0;
-        while not EMPTY do begin
-            if _queue.iDx > 0 then begin
-                    _queue.client.state := OSActive;
-                    _queue.itemOut := _queue.buffer[_queue.iDx];
-                    Dec(_queue.iDx);
+        while CAN_PERFORM and _queue.client.state <> OSStop do begin
+            if _digit.iDx > 0 then begin
+                _queue.client.state := OSActive;
+                _digit.itemOut := _queue.buffer[_queue.iDx];
+                Dec(_digit.iDx);
             end else begin
-                    _queue.client.state := OSPassive;
-                    _queue.excess := _queue.time + _queue.excess - _queue.counter;
-                    SERVER;
-                    Exit;
+                _queue.client.state := OSPassive;
+            end;
+
+            if not EMPTY then begin
+                story := DEQUEUE;
+
+            end else begin
+                _queue.client.state := OSPassive;
+            end;
+
+            if _queue.client.state = OSPassive then begin
+                _queue.excess := _queue.time + _queue.excess - _queue.counter;
+                SERVER;
+                Exit;
             end;
 
             QUEUE_DRAW;
@@ -469,21 +501,47 @@ procedure CLIENT;
     end;
 
 procedure SERVER;
+    var
+    	story: String[34];
+        s: String[8];
+
     begin
         _queue.counter := 0;
-        while not EMPTY do begin
-            if _queue.iDx < BUFFER_SIZE then begin
+        while CAN_PERFORM and _queue.server.state <> OSStop do begin
+            if _digit.iDx < BUFFER_SIZE then begin
                 _queue.server.state := OSActive;
 
                 repeat
-                    inc(_queue.item);
-                until FEATURE(_queue.item);
+                    inc(_digit.item);
+                until FEATURE(_digit.item);
 
-                _queue.itemIn := _queue.item;
-                inc(_queue.iDx);
-                _queue.buffer[_queue.iDx] := _queue.item;
+                _digit.itemIn := _queue.item;
+                inc(_digit.iDx);
+                _queue.buffer[_digit.iDx] := _digit.item;
             end	else begin
                 _queue.server.state := OSPassive;
+            end;
+
+            if not FULL then begin
+                if EOF(_file) then begin
+                    Reset(_file);
+                end else begin
+                    read(_file, story);
+                end;
+
+                while Length(strory) < 34 do begin
+                    strory := strory + ' ';
+                end;
+
+                ENQUEUE(strory);
+                { вывод процентов }
+
+            end else begin
+                _queue.server.state := OSPassive;
+            end;
+
+
+            if _queue.server.state = OSPassive then begin
                 _queue.excess := _queue.time + _queue.excess - _queue.counter;
                 CLIENT;
                 Exit;
@@ -546,7 +604,7 @@ procedure KeyboadrHandler; interrupt;
                 if framerate > 1 then begin
                     Dec(framerate);
                     _ticker.timer.framerate := framerate;
-                    DRAW_CONTROLL;
+                    DRAW_RUNNING_LINE;
                 end;
             end;
 
@@ -555,7 +613,7 @@ procedure KeyboadrHandler; interrupt;
                 if framerate < MAX_COUNTER then begin
                     Inc(framerate);
                     _ticker.timer.framerate := framerate;
-                    DRAW_CONTROLL;
+                    DRAW_RUNNING_LINE;
                 end;
             end;
 
@@ -577,7 +635,7 @@ procedure KeyboadrHandler; interrupt;
 
                 _ticker.row := y;
                 _ticker.line.keyboardState := OSKeyboardTouchEnded;
-                DRAW_CONTROLL;
+                DRAW_RUNNING_LINE;
             end;
 
         end;
@@ -635,6 +693,7 @@ procedure DRAW; { Render the view }
     begin
         {0, 0, 80, 25}
         TextBackground(Black); { Background color }
+        TextColor(Black);
         ClrScr; { Clear all sumbols }
 
         DRAW_CONTROLL;
