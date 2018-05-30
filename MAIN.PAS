@@ -12,6 +12,7 @@ const
     BUFFER_VERSE_SIZE = 15;
     MAX_TIME_SLICE = 2;
     LOCK_TIME = 50;
+    NUMBER_OF_SOUND = 28;
 
 procedure CLIENT; forward;
 procedure SERVER; forward;
@@ -20,6 +21,12 @@ const
     running_line_text : String = 'A: Korolev Anton. W: "Operating systems" ';
     C_FNAME = 'textfile.txt';
     Path = '\lOG_MAIN.txt';
+
+    sound_tones:  array[1..NUMBER_OF_SOUND] of Integer = (500, 0, 600, 0  , 600, 0, 500, 0  ,
+    800, 0, 700, 0, 800, 0, 700, 0, 800, 0, 700, 0, 800, 0, 700, 0, 800, 0, 900, 0);
+    sound_delays: array[1..NUMBER_OF_SOUND] of Integer = (3, 1, 20, 16, 3, 1, 20, 16,
+    3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 16, 10);
+
 
 type
 	Cell = record { Struct video view cell }
@@ -88,7 +95,7 @@ type
     Ticker = record  { Object first task }
         line                : Line;
         timer               : Timer;
-
+        state               : OSOperationState;
         {   /////////////
             /// video settings /// }
         row                 : Integer;
@@ -120,6 +127,12 @@ type
         excess                      : Integer; {thread_interval_time}
     end;
 
+    Player = record
+        iDx, counter, delay           : Integer;
+        state                       : OSOperationState;
+
+    end;
+
 
 var
     _video_memory	    : TXTVM absolute $B800:$0000;
@@ -127,6 +140,7 @@ var
 
     _ticker             : Ticker;
     _queue              : Queue;
+    _player              : Player;
 
     _digit              : DigitBuf;
     _verse              : VerseBuf;
@@ -203,7 +217,7 @@ procedure DRAW_RUNNING_LINE;
 procedure DRAW_CONTROLL;
     begin
         { Border }
-        Window(2, 2, 38, 23);
+        Window(2, 2, 38, 24);
         TextBackground(White);
         TextColor(Black);
         ClrScr;
@@ -213,13 +227,53 @@ procedure DRAW_CONTROLL;
 
         { Body }
         { 24 - 10 }
-        Window(3, 3, 37, 22);
+        Window(3, 3, 37, 23);
         TextBackground(Black);
         TextColor(White);
         ClrScr;
 
-        { --- --- --- --- --- --- Running line --- --- --- --- --- --- }
+        { --- --- --- --- --- --- Operations --- --- --- --- --- --- }
         Window(3, 3, 37, 4);
+        TextBackground(Brown);
+        TextColor(White);
+        ClrScr;
+
+        GoToXY(11, 1);
+        Write('TASKS STATES'); { 12 pt }
+
+        Window(3, 4, 37, 8); { FRAME OPERATIONS }
+        TextBackground(Black);
+        TextColor(White);
+        ClrScr;
+
+        GotoXY(1, 1);
+        WriteLn('F1 Running line        :'); { 24 pt }
+        WriteLn('F2 Music               :');
+        WriteLn('F3 Client              :');
+        Write('F4 Server              :');
+
+        { --- --- --- --- --- --- Buffers --- --- --- --- --- --- }
+        Window(3, 8, 37, 9);
+        TextBackground(Brown);
+        TextColor(White);
+        ClrScr;
+
+        GoToXY(11, 1);
+        Write('THREAD STATE'); { 12 pt }
+
+        Window(3, 9, 37, 13); { FRAME BUFFER }
+        TextBackground(Black);
+        TextColor(White);
+        ClrScr;
+
+        GoToXY(1, 1);
+        writeLn('F5 / F6 Client time    :');
+        writeLn('F7 / F8 Server time    :');
+        WriteLn('Digit buffer level     :');
+        Write('Verse buffer level     :');
+
+        { --- --- --- --- --- --- Running line --- --- --- --- --- --- }
+        Window(3, 13, 37, 14);
         TextBackground(Brown);
         TextColor(White);
         ClrScr;
@@ -227,32 +281,31 @@ procedure DRAW_CONTROLL;
         GoToXY(11, 1);
         Write('RUNNING LINE'); { 12 pt }
 
-        Window(3, 4, 37, 6); { FRAME RUNNING LINE }
+        Window(3, 14, 37, 16); { FRAME RUNNING LINE }
         TextBackground(Black);
         TextColor(White);
         ClrScr;
 
         GotoXY(1, 1);
-        WriteLn('Q   Swap location       :');
-        Write('+/- Change speed        :');
+        WriteLn('Q   Swap location      :');
+        Write('+/- Change speed       :');
 
-        { --- --- --- --- --- --- Thread --- --- --- --- --- --- }
-        Window(3, 6, 37, 7);
+        { --- --- --- --- --- --- Common --- --- --- --- --- --- }
+        Window(3, 16, 37, 17);
         TextBackground(Brown);
         TextColor(White);
         ClrScr;
 
-        GoToXY(10, 1);
-        Write('BUFFER  STREAM'); { 14 pt }
+        GoToXY(14, 1);
+        Write('COMMON'); { 6 pt }
 
-        Window(3, 7, 37, 10); { FRAME RUNNING LINE }
+        Window(3, 17, 37, 18); { FRAME RUNNING LINE }
         TextBackground(Black);
         TextColor(White);
         ClrScr;
 
         GoToXY(1, 1);
-        WriteLn('F1 SERVER               :');
-        Write('F2 CLIENT               :');
+        Write('Esc - exit             :');
     end;
 
 procedure LOGG(s : String);
@@ -282,6 +335,7 @@ procedure TICKER_INIT;
 
         _ticker.insertItemIndex := FIRST_ITEM;
         _ticker.counter := FIRST_ITEM;
+        _ticker.state := OSActive;
     end;
 
 procedure TICKER_DRAW;
@@ -323,23 +377,20 @@ procedure TICKER_DRAW;
 
 procedure TIME_TICKER_HANDLER;
     var
-        counter, framerate : Integer;
+        framerate : Integer;
 
     begin
-        counter     := _ticker.timer.counter;
         framerate   := _ticker.timer.framerate;
 
-		case _ticker.line.keyboardState of
-			OSKeyboardTouchEnded: begin
-    			inc(counter);
-    			if counter >= MAX_COUNTER - framerate then begin
+        case _ticker.state of
+			OSActive: begin
+    			inc(_ticker.timer.counter);
+    			if _ticker.timer.counter >= MAX_COUNTER - framerate then begin
     				TICKER_DRAW;
-    				counter := 0;
+    				_ticker.timer.counter := 0;
     			end;
 			end;
 		end;
-
-        _ticker.timer.counter := counter;
     end;
 
 { 	////////////////////////////////////////////
@@ -603,6 +654,59 @@ procedure TIME_QUEUE_HANDLER;
     end;
 
 { 	////////////////////////////////////////////
+	// pragma mark - SOUND //
+}
+
+procedure SOUND_INIT;
+    begin
+        _player.iDx := 0;
+        _player.state := OSActive;
+        _player.counter := 0;
+        _player.delay := 0;
+    end;
+
+procedure PLAY_SOUND;
+    var
+        signal : Integer;
+
+    begin
+        _player.counter := 0;
+
+        if _player.iDx < NUMBER_OF_SOUND then begin
+            Inc(_player.iDx);
+
+            signal := sound_tones[_player.iDx];
+            _player.delay := sound_delays[_player.iDx];
+
+            if signal = 0 then begin
+                Nosound;
+            end else begin
+                Sound(signal);
+            end;
+        end else begin
+            _player.iDx := 0;
+        end;
+    end;
+
+procedure RUN_SOUND;
+    begin
+        if _player.counter >= _player.delay then begin
+            PLAY_SOUND;
+        end else begin
+            Inc(_player.counter);
+        end;
+    end;
+
+procedure TIME_SOUND_HANDLER;
+    begin
+        if _player.state = OSActive then begin
+            RUN_SOUND;
+        end else begin
+            NoSound;
+        end;
+    end;
+
+{ 	////////////////////////////////////////////
 	// pragma mark - INTERRUPT //
 }
 
@@ -611,6 +715,7 @@ procedure TimeHandler; interrupt;
 	begin
         TIME_TICKER_HANDLER;
         TIME_QUEUE_HANDLER;
+        TIME_SOUND_HANDLER;
 
 		inline($09C);
 		Systime;
@@ -731,6 +836,8 @@ procedure DRAW; { Render the view }
 procedure INIT; { Setting the property }
     begin
         TICKER_INIT;
+        QUEUE_INIT;
+        SOUND_INIT;
 
         _ESC := False;
     end;
@@ -757,7 +864,7 @@ BEGIN
     GotoXY(1, MAX_HEIGHT);
     SetCursorSize($06, $07);
 
-    QUEUE_INIT;
+
 
     ARGC;
     INIT;
@@ -783,6 +890,7 @@ BEGIN
     GotoXY(1, MAX_HEIGHT);
     ClrScr;
 
+    Nosound;
     SetIntVec($8, Addr(Systime));
     SetIntVec($9, Addr(Keyboard));
 
