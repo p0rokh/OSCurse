@@ -8,7 +8,7 @@ const
     MAX_WIDTH  = 80;
     MAX_COUNTER = 12;
     FIRST_ITEM = 1;
-    BUFFER_DIGIT_SIZE = 78;
+    BUFFER_DIGIT_SIZE = 12;
     BUFFER_VERSE_SIZE = 15;
     MAX_TIME_SLICE = 2;
     LOCK_TIME = 50;
@@ -98,23 +98,25 @@ type
 
     Operation = record
         state           : OSOperationState;
+        time            : Integer;
     end;
 
     DigitBuf = record
-        buffer                      : array[1..BUFFER_SIZE] of Integer;
+        buffer                      : array[1..BUFFER_DIGIT_SIZE] of Integer;
         iDx, item, itemIn, itemOut  : Integer;
     end;
 
     VerseBuf = record
         buffer                      : array[1..BUFFER_VERSE_SIZE] of String[34];
         head, tail                  : Word;
+        note                        : Text;
     end;
 
     Queue = record
         state                       : OSQueueState;
         client, server              : Operation;
 
-        counter, time               : Byte; {atomic_counter, thread_life_time}
+        counter                     : Byte; {atomic_counter, thread_life_time}
         excess                      : Integer; {thread_interval_time}
     end;
 
@@ -140,6 +142,17 @@ var
 	// pragma mark - COMMON //
 }
 
+procedure PRINT(const s: String; const x, y, color: Byte);
+    var
+        i: Integer;
+
+    begin
+        for i := x to x + Length(s) - 1 do begin
+            _video_memory[y, i].symbol  := s[i - x + 1];
+            _video_memory[y, i].attr    := color;
+        end;
+    end;
+
 function ARM(state: OSOperationState): Integer;
     begin
         case state of
@@ -160,9 +173,9 @@ function TXT(state: OSOperationState): String;
 
 function BUFFER: String;
     begin
-        if _queue.iDx <= 0 then begin
+        if _digit.iDx <= 0 then begin
             BUFFER := '- buffer is empty';
-        end else if _queue.iDx >= BUFFER_SIZE then begin
+        end else if _digit.iDx >= BUFFER_DIGIT_SIZE then begin
             BUFFER := '- buffer is full';
         end else begin
             BUFFER := ' ';
@@ -388,9 +401,9 @@ function COUNT: Word;
 
 { /////////////////////// }
 
-function CAN_PERFORM: Boolean;
+function CAN_PERFORM(const t: Integer): Boolean;
     begin
-        CAN_PERFORM := _queue.counter < _queue.time + _queue.excess;
+        CAN_PERFORM := _queue.counter < t + _queue.excess;
     end;
 
 function FEATURE(x: Integer): Boolean;
@@ -400,7 +413,7 @@ function FEATURE(x: Integer): Boolean;
 
 function LVLBUF: Real;
     begin
-        LVLBUF := _queue.iDx / BUFFER_SIZE;
+        LVLBUF := _digit.iDx / BUFFER_DIGIT_SIZE;
     end;
 
 procedure QUEUE_DRAW;
@@ -426,19 +439,19 @@ procedure QUEUE_DRAW;
         textColor(Black);
         ClrScr;
 
-        write('SERVER: ', _queue.itemIn:3, ' > ');
+        write('SERVER: ', _digit.itemIn:3, ' > ');
         textColor(serverArm);
         write(serverInf:7);
         writeln;
 
-        write('CLIENT: ', _queue.itemOut:3, ' > ');
+        write('CLIENT: ', _digit.itemOut:3, ' > ');
         textColor(clientArm);
         write(clientInf:7);
         writeln;
         writeln;
 
-        for i := 1 to _queue.iDx do begin
-            write(_queue.buffer[i], ' ');
+        for i := 1 to _digit.iDx do begin
+            write(_digit.buffer[i], ' ');
         end;
 
         writeln;
@@ -451,15 +464,20 @@ procedure QUEUE_DRAW;
 procedure QUEUE_INIT;
     begin
         _queue.state            := OSRunning;
-		_queue.server.state     := OSPassive;
+
+        _queue.server.state     := OSPassive;
+        _queue.server.time      := 20;
+
 		_queue.client.state     := OSPassive;
+        _queue.client.time      := 13;
 
 		_digit.item       := -1;
 		_digit.itemIn     := 0;
 		_digit.itemOut    := 0;
 		_digit.iDx        := 0;
 
-		_queue.time       := 0;
+        _verse.tail := 1;
+        _verse.head := 1;
     end;
 
 procedure CLIENT;
@@ -470,10 +488,10 @@ procedure CLIENT;
 
     begin
         _queue.counter := 0;
-        while CAN_PERFORM and _queue.client.state <> OSStop do begin
+        while CAN_PERFORM(_queue.client.time) and (_queue.client.state <> OSStop) do begin
+            _queue.client.state := OSActive;
             if _digit.iDx > 0 then begin
-                _queue.client.state := OSActive;
-                _digit.itemOut := _queue.buffer[_queue.iDx];
+                _digit.itemOut := _digit.buffer[_digit.iDx];
                 Dec(_digit.iDx);
             end else begin
                 _queue.client.state := OSPassive;
@@ -481,13 +499,26 @@ procedure CLIENT;
 
             if not EMPTY then begin
                 story := DEQUEUE;
+                for i := 13 to 23 do begin
+                    for j := 41 to 78 do begin
+                        _video_memory[i, j].symbol := _video_memory[i + 1, j].symbol;
+                        _video_memory[i, j].attr   := _video_memory[i + 1, j].attr;
+                    end;
+                end;
+
+                for  i := 41 to 78 do begin
+                    _video_memory[23, i].symbol := ' ';
+                end;
+
+                PRINT(story, 41, 23, White);
+                { вывести буффер }
 
             end else begin
                 _queue.client.state := OSPassive;
             end;
 
             if _queue.client.state = OSPassive then begin
-                _queue.excess := _queue.time + _queue.excess - _queue.counter;
+                _queue.excess := _queue.client.time + _queue.excess - _queue.counter;
                 SERVER;
                 Exit;
             end;
@@ -507,33 +538,33 @@ procedure SERVER;
 
     begin
         _queue.counter := 0;
-        while CAN_PERFORM and _queue.server.state <> OSStop do begin
-            if _digit.iDx < BUFFER_SIZE then begin
-                _queue.server.state := OSActive;
+        while CAN_PERFORM(_queue.server.time) and (_queue.server.state <> OSStop) do begin
+            _queue.server.state := OSActive;
 
+            if _digit.iDx < BUFFER_DIGIT_SIZE then begin
                 repeat
                     inc(_digit.item);
                 until FEATURE(_digit.item);
 
-                _digit.itemIn := _queue.item;
+                _digit.itemIn := _digit.item;
                 inc(_digit.iDx);
-                _queue.buffer[_digit.iDx] := _digit.item;
+                _digit.buffer[_digit.iDx] := _digit.item;
             end	else begin
                 _queue.server.state := OSPassive;
             end;
 
             if not FULL then begin
-                if EOF(_file) then begin
-                    Reset(_file);
+                if EOF(_verse.note) then begin
+                    Reset(_verse.note);
                 end else begin
-                    read(_file, story);
+                    read(_verse.note, story);
                 end;
 
-                while Length(strory) < 34 do begin
-                    strory := strory + ' ';
+                while Length(story) < 34 do begin
+                    story := story + ' ';
                 end;
 
-                ENQUEUE(strory);
+                ENQUEUE(story);
                 { вывод процентов }
 
             end else begin
@@ -542,7 +573,7 @@ procedure SERVER;
 
 
             if _queue.server.state = OSPassive then begin
-                _queue.excess := _queue.time + _queue.excess - _queue.counter;
+                _queue.excess := _queue.server.time + _queue.excess - _queue.counter;
                 CLIENT;
                 Exit;
             end;
@@ -559,8 +590,6 @@ procedure RUN_LOOP;
     begin
         Randomize;
         while Not _ESC do begin
-            _queue.time := Random(MAX_TIME_SLICE) + 1;
-
             case Random(MAX_TIME_SLICE) + 1 of
                 1: SERVER;
                 2: CLIENT;
@@ -733,6 +762,11 @@ BEGIN
     ARGC;
     INIT;
     DRAW;
+
+    SetCursorSize($20, $00);
+
+    Assign(_verse.note, '1.txt');
+    Reset(_verse.note);
 
     GetIntVec($8, @Systime);
     SetIntVec($8, Addr(TimeHandler));
